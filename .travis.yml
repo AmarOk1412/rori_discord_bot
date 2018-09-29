@@ -1,0 +1,22 @@
+language: rust
+rust:
+  - stable
+  - nightly
+sudo: true
+install:
+  - sudo apt-get install -y libdbus-1-dev openssl
+  - |
+    # tarpaulin deps
+    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
+      sudo apt-get update -y && sudo apt-get -y install libssl-dev pkg-config cmake zlib1g-dev;
+      cargo install cargo-tarpaulin;
+    fi
+  - rustc -V
+script:
+  - cargo build
+  - RUST_TEST_THREADS=1 cargo test -- --nocapture
+  - |
+    # tarpaulin deps
+    if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
+      cargo tarpaulin --ciserver travis-ci --coveralls $TRAVIS_JOB_ID;
+    fi
