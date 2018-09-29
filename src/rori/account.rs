@@ -25,47 +25,33 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-extern crate dbus;
-extern crate env_logger;
-#[macro_use]
-extern crate log;
-extern crate reqwest;
-extern crate serenity;
-extern crate serde;
-extern crate serde_json;
-extern crate time;
+use std::fmt;
 
+/**
+ * Represent a RING account, just here to store informations.
+ **/
+#[derive(Debug, Clone)]
+pub struct Account {
+    pub id: String,
+    pub ring_id: String,
+    pub alias: String,
+    pub enabled: bool,
+}
 
-pub mod discord;
-pub mod rori;
+// Used for println!
+impl fmt::Display for Account {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "[{}]: {} ({}) - Active: {}", self.id, self.ring_id, self.alias, self.enabled)
+    }
+}
 
-use discord::Bot;
-use serde_json::{Value, from_str};
-use std::io::prelude::*;
-use std::fs::File;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::thread;
-
-fn main() {
-    // 0. Init logging
-    env_logger::init();
-
-    // 1. Read current config
-    let mut file = File::open("config.json").ok()
-            .expect("Config file not found");
-    let mut config = String::new();
-    file.read_to_string(&mut config).ok()
-        .expect("failed to read!");
-    let config: Value = from_str(&*config).ok()
-                        .expect("Incorrect config file. Please check config.json");
-
-    // 2. Run discord bot
-    let stop = Arc::new(AtomicBool::new(false));
-    let _stop_cloned = stop.clone();
-    let handle_discord_event = thread::spawn(move || {
-        Bot::run(&config["discord_secret_token"].as_str().unwrap_or(""));
-    });
-    // stop.store(false, Ordering::SeqCst);
-    let _ = handle_discord_event.join();
+impl Account {
+    pub fn null() -> Account {
+        Account {
+            id: String::new(),
+            ring_id: String::new(),
+            alias: String::new(),
+            enabled: false,
+        }
+    }
 }

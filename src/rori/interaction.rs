@@ -25,47 +25,43 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-extern crate dbus;
-extern crate env_logger;
-#[macro_use]
-extern crate log;
-extern crate reqwest;
-extern crate serenity;
-extern crate serde;
-extern crate serde_json;
-extern crate time;
+use serde::ser::{Serialize, SerializeStruct};
+use serde::Serializer;
+use std::fmt;
+use time::Tm;
 
+/**
+ * Represent a RING interaction, just here to store informations.
+ * NOTE: need a type attribute in the future.
+ **/
+#[derive(Clone)]
+pub struct Interaction
+{
+    pub author_ring_id: String,
+    pub body: String,
+    pub datatype: String,
+    pub time: Tm
+}
 
-pub mod discord;
-pub mod rori;
+// Used for println!
+impl fmt::Display for Interaction {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} ({}): {}", self.author_ring_id, self.datatype, self.body)
+    }
+}
 
-use discord::Bot;
-use serde_json::{Value, from_str};
-use std::io::prelude::*;
-use std::fs::File;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::thread;
-
-fn main() {
-    // 0. Init logging
-    env_logger::init();
-
-    // 1. Read current config
-    let mut file = File::open("config.json").ok()
-            .expect("Config file not found");
-    let mut config = String::new();
-    file.read_to_string(&mut config).ok()
-        .expect("failed to read!");
-    let config: Value = from_str(&*config).ok()
-                        .expect("Incorrect config file. Please check config.json");
-
-    // 2. Run discord bot
-    let stop = Arc::new(AtomicBool::new(false));
-    let _stop_cloned = stop.clone();
-    let handle_discord_event = thread::spawn(move || {
-        Bot::run(&config["discord_secret_token"].as_str().unwrap_or(""));
-    });
-    // stop.store(false, Ordering::SeqCst);
-    let _ = handle_discord_event.join();
+/**
+ * Used for serde_json
+ */
+impl Serialize for Interaction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        // 3 is the number of fields in the struct.
+       let mut state = serializer.serialize_struct("Interaction", 3)?;
+       state.serialize_field("author_ring_id", &self.author_ring_id).unwrap();
+       state.serialize_field("body", &self.body).unwrap();
+       state.serialize_field("time", &self.time.rfc3339().to_string()).unwrap();
+       state.end()
+    }
 }
