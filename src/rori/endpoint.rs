@@ -86,14 +86,13 @@ impl Endpoint {
      * Listen from interresting signals from dbus and call handlers
      * @param self
      */
-    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, stop: Arc<AtomicBool>, rori_text: Arc<Mutex<String>>, user_text: Arc<Mutex<String>>, user_logged: Arc<Mutex<bool>>) {
+    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, stop: Arc<AtomicBool>, user_text: Arc<Mutex<String>>, rori_text: Arc<Mutex<String>>) {
         // Use another dbus connection to listen signals.
         let dbus_listener = Connection::get_private(BusType::Session).unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=incomingAccountMessage").unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=incomingTrustRequest").unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=accountsChanged").unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=registrationStateChanged").unwrap();
-        let rori_ring_id = manager.lock().unwrap().rori_ring_id.clone();
         // For each signals, call handlers.
         for i in dbus_listener.iter(100) {
 
@@ -102,6 +101,10 @@ impl Endpoint {
             m.handle_registration_changed(&i);
             if let Some((account_id, interaction)) = m.handle_interactions(&i) {
                 info!("New interation for {}: {}", account_id, interaction);
+                if account_id == m.account.id {
+                    // TODO forward all interaction.
+                    *rori_text.lock().unwrap() = interaction.body;
+                }
             };
             if let Some((account_id, from)) = m.handle_requests(&i) {
                 if account_id == m.account.id {
