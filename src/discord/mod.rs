@@ -25,10 +25,15 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-use serenity::model::channel::Message;
+use serenity::CACHE;
+use serenity::model::channel::{GuildChannel, Message};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use serenity::utils::MessageBuilder;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
+
 
 /**
  * Represent a RING account, just here to store informations.
@@ -36,51 +41,68 @@ use serenity::utils::MessageBuilder;
 #[derive(Debug, Clone)]
 pub struct Bot;
 
-struct Handler;
+struct Handler {
+    user_say: Arc<Mutex<String>>,
+    channel: Arc<Mutex<Option<GuildChannel>>>,
+}
 
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
-        if msg.content == "!ping" {
-            let channel = match msg.channel_id.to_channel() {
-                Ok(channel) => channel,
-                Err(why) => {
-                    error!("Error getting channel: {:?}", why);
-
-                    return;
-                },
-            };
-
-            // The message builder allows for creating a message by
-            // mentioning users dynamically, pushing "safe" versions of
-            // content (such as bolding normalized content), displaying
-            // emojis, and more.
-            let response = MessageBuilder::new()
-                .push("User ")
-                .push_bold_safe(msg.author.name)
-                .push(" used the 'ping' command in the ")
-                .mention(&channel)
-                .push(" channel")
-                .build();
-
-            if let Err(why) = msg.channel_id.say(&response) {
-                error!("Error sending message: {:?}", why);
-            }
+        if msg.author.id != CACHE.read().user.id {
+            // TODO: for now, just forward content
+            *self.user_say.lock().unwrap() = msg.content.clone();
         }
     }
 
     fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
+        for guild in ready.guilds {
+            let server_name = guild.id().to_partial_guild().unwrap().name;
+            for (_, chan) in guild.id().channels().ok().expect("No channels!") {
+                // TODO: this is temporary. Just forward to one channel
+                if server_name == "RORI" && chan.name() == "general" {
+                    *self.channel.lock().unwrap() = Some(chan);
+                }
+            }
+        }
     }
 }
 
 impl Bot {
-    pub fn run(secret_token: &str) {
+    pub fn run(secret_token: &str, user_say: Arc<Mutex<String>>, rori_say: Arc<Mutex<String>>) {
         // Configure the client with your Discord bot token in the environment.
-        let mut client = Client::new(secret_token, Handler)
+        let channel = Arc::new(Mutex::new(None));
+        let channel_cloned = channel.clone();
+        let mut client = Client::new(secret_token, Handler { user_say, channel })
                          .expect("Error initializing RORI client");
+
+        let answer_thread = thread::spawn(move || {
+             loop {
+                 // TODO: For now, just forward incoming messages to discord
+                 let to_say: String = String::from(&*rori_say.lock().unwrap().clone());
+                 if !to_say.is_empty() {
+                     info!("{}", to_say);
+                     let response = MessageBuilder::new()
+                         .push(&*to_say)
+                         .build();
+                     *rori_say.lock().unwrap() = String::new();
+                     let channel = &*channel_cloned.lock().unwrap();
+                     if let Some(c) = channel {
+                         if let Err(why) = c.id.say(&response) {
+                             error!("Error sending message: {:?}", why);
+                         }
+                     }
+                 }
+                 // Let some time for the daemon
+                 let five_hundred_ms = Duration::from_millis(500);
+                 thread::sleep(five_hundred_ms);
+             }
+        });
 
         if let Err(why) = client.start() {
             error!("Client error: {:?}", why);
         }
+        // TODO stop correctly
+        let _ = answer_thread.join();
     }
 }
