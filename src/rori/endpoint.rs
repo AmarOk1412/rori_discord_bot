@@ -115,7 +115,11 @@ impl Endpoint {
             let utext = user_text.lock().unwrap().clone();
             if utext != "" {
                 *user_text.lock().unwrap() = String::new();
-                m.send_interaction_to_rori(&*utext, "text/plain");
+                let mut datatype = "text/plain";
+                if m.is_a_command(&utext) {
+                    datatype = "rori/command";
+                }
+                m.send_interaction_to_rori(&*utext, datatype);
             }
             if stop.load(Ordering::SeqCst) {
                 break;
@@ -410,6 +414,24 @@ impl Endpoint {
         // incomingTrustRequest return three arguments
         let (account_id, from, _, _) = msg.get4::<&str, &str, Dict<&str, &str, _>, u64>();
         Some((account_id.unwrap().to_string(), from.unwrap().to_string()))
+    }
+
+    /**
+     * Detect if a message is a correct command
+     * Based on https://github.com/AmarOk1412/rori_core/wiki/Custom-datatypes-handling
+     * NOTE: some commands are forbidden user side (like datatypes management)
+     * @param self
+     * @param text to verify
+     * @return true if it's a correct command
+     */
+    fn is_a_command(&self, text: &String) -> bool {
+        let v: Vec<&str> = text.split(' ').collect();
+        if v.len() == 0 {
+            return false
+        }
+        let whitelist_commands = ["/register", "/unregister",
+                                  "/add_device", "/rm_device", "/link"];
+        whitelist_commands.contains(&v[0])
     }
 
 

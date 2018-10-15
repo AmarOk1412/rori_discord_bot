@@ -25,7 +25,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
-use serenity::CACHE;
 use serenity::model::channel::{GuildChannel, Message};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
@@ -33,7 +32,6 @@ use serenity::utils::MessageBuilder;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-
 
 /**
  * Represent a RING account, just here to store informations.
@@ -48,7 +46,20 @@ struct Handler {
 
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
-        if msg.author.id != CACHE.read().user.id {
+        if msg.content == "/help" {
+            let mut usage: String = String::from("Hi! I'm RORI, a free distributed chatterbot.\n");
+            usage += "If you want to use this instance as another user.\n";
+            usage += "This is some commands:\n";
+            usage += "/register <username> for registering a user\n";
+            usage += "/unregister for unregistering a user\n";
+            usage += "/add_device <device_name> [id] for giving a name to a device\n";
+            usage += "/rm_device <device_name> [id] for removing a device\n";
+            usage += "/link <id|username> for adding a new device to a user";
+
+            if let Err(why) = msg.channel_id.say(usage) {
+                println!("Error sending message: {:?}", why);
+            }
+        } else {
             // TODO: for now, just forward content
             *self.user_say.lock().unwrap() = msg.content.clone();
         }
