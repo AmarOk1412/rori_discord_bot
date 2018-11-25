@@ -42,6 +42,7 @@ pub mod discord;
 pub mod rori;
 
 use discord::Bot;
+use discord::DiscordMsg;
 use rori::endpoint::Endpoint;
 use serde_json::{Value, from_str};
 use std::io::prelude::*;
@@ -190,15 +191,14 @@ fn main() {
     // 2. Init Ring account
     let stop = Arc::new(AtomicBool::new(false));
     let stop_cloned = stop.clone();
-    let user_text = Arc::new(Mutex::new(String::new()));
-    let rori_text = Arc::new(Mutex::new(String::new()));
+    let user_text = Arc::new(Mutex::new(DiscordMsg::new()));
+    let rori_text = Arc::new(Mutex::new(DiscordMsg::new()));
     let user_text_cloned = user_text.clone();
     let rori_text_cloned = rori_text.clone();
 
     let _handle_signals = thread::spawn(move || {
         let shared_endpoint : Arc<Mutex<Endpoint>> = Arc::new(Mutex::new(
             Endpoint::init(config["ring_id"].as_str().unwrap_or(""),
-                           config["rori_server"].as_str().unwrap_or(""),
                            config["rori_ring_id"].as_str().unwrap_or(""))
             .ok().expect("Can't initialize ConfigurationEndpoint"))
         );
@@ -207,8 +207,8 @@ fn main() {
 
     // 3. Run discord bot
     let handle_discord_event = thread::spawn(move || {
-        Bot::run(&config_cloned["discord_secret_token"].as_str().unwrap_or(""),
-                 user_text_cloned, rori_text_cloned);
+        Bot::new().run(&config_cloned["discord_secret_token"].as_str().unwrap_or(""),
+            user_text_cloned, rori_text_cloned);
     });
     // stop.store(false, Ordering::SeqCst);
     let _ = handle_discord_event.join();

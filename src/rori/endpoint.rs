@@ -27,6 +27,7 @@
 
 use dbus::{Connection, ConnectionItem, BusType, Message};
 use dbus::arg::{Array, Dict};
+use discord::DiscordMsg;
 use reqwest;
 use rori::account::Account;
 use rori::interaction::Interaction;
@@ -44,12 +45,10 @@ use time;
 pub struct Endpoint {
     pub account: Account,
 
-    rori_server: String,
     rori_ring_id: String,
     ring_dbus: &'static str,
     configuration_path: &'static str,
     configuration_iface: &'static str,
-    to_say: Arc<Mutex<Vec<String>>>,
 }
 
 impl Endpoint {
@@ -58,16 +57,14 @@ impl Endpoint {
      * @param ring_id to retrieve
      * @return a Manager if success, else an error
      */
-    pub fn init(ring_id: &str, rori_server: &str, rori_ring_id: &str) -> Result<Endpoint, &'static str> {
+    pub fn init(ring_id: &str, rori_ring_id: &str) -> Result<Endpoint, &'static str> {
         let mut manager = Endpoint {
             account: Account::null(),
 
-            rori_server: String::from(rori_server),
             rori_ring_id: String::from(rori_ring_id),
             ring_dbus: "cx.ring.Ring",
             configuration_path: "/cx/ring/Ring/ConfigurationManager",
             configuration_iface: "cx.ring.Ring.ConfigurationManager",
-            to_say: Arc::new(Mutex::new(Vec::new()))
         };
         manager.account = Endpoint::build_account(ring_id);
         if !manager.account.enabled {
@@ -86,7 +83,7 @@ impl Endpoint {
      * Listen from interresting signals from dbus and call handlers
      * @param self
      */
-    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, stop: Arc<AtomicBool>, user_text: Arc<Mutex<String>>, rori_text: Arc<Mutex<String>>) {
+    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, stop: Arc<AtomicBool>, user_text: Arc<Mutex<DiscordMsg>>, rori_text: Arc<Mutex<DiscordMsg>>) {
         // Use another dbus connection to listen signals.
         let dbus_listener = Connection::get_private(BusType::Session).unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=incomingAccountMessage").unwrap();
@@ -103,7 +100,16 @@ impl Endpoint {
                 info!("New interation for {}: {}", account_id, interaction);
                 if account_id == m.account.id {
                     // TODO forward all interaction.
-                    *rori_text.lock().unwrap() = interaction.body;
+                    let mut channel = String::new();
+                    if interaction.metadatas.contains_key("ch") {
+                        channel = interaction.metadatas["ch"].clone();
+                    }
+                    *rori_text.lock().unwrap() = DiscordMsg {
+                        id: String::new(),
+                        body: interaction.body,
+                        author: String::new(),
+                        channel: channel,
+                    };
                 }
             };
             if let Some((account_id, from)) = m.handle_requests(&i) {
@@ -113,13 +119,18 @@ impl Endpoint {
                 }
             };
             let utext = user_text.lock().unwrap().clone();
-            if utext != "" {
-                *user_text.lock().unwrap() = String::new();
+            if utext.body != "" {
+                *user_text.lock().unwrap() = DiscordMsg::new();
                 let mut datatype = "text/plain";
-                if m.is_a_command(&utext) {
+                if m.is_a_command(&utext.body) {
                     datatype = "rori/command";
                 }
-                m.send_interaction_to_rori(&*utext, datatype);
+                let mut payloads: HashMap<&str, &str> = HashMap::new();
+                payloads.insert(datatype, &*utext.body);
+                payloads.insert("sa", &*utext.author);
+                payloads.insert("th", &*utext.id);
+                payloads.insert("ch", &*utext.channel);
+                m.send_interaction_to_rori(payloads);
             }
             if stop.load(Ordering::SeqCst) {
                 break;
@@ -369,11 +380,20 @@ impl Endpoint {
         let author_ring_id = author_ring_id.unwrap().to_string();
         let mut body = String::new();
         let mut datatype = String::new();
+        let mut metadatas: HashMap<String, String> = HashMap::new();
         for detail in payloads.unwrap() {
             match detail {
                 (key, value) => {
-                    datatype = key.to_string();
-                    body = value.to_string();
+                    // TODO for now, text/plain is the only supported datatypes, changes this with key in supported datatypes
+                    if key == "text/plain" {
+                        datatype = key.to_string();
+                        body = value.to_string();
+                    } else {
+                        metadatas.insert(
+                            key.to_string(),
+                            value.to_string()
+                        );
+                    }
                 }
             }
         };
@@ -381,7 +401,8 @@ impl Endpoint {
             author_ring_id: author_ring_id,
             body: body,
             datatype: datatype,
-            time: time::now()
+            time: time::now(),
+            metadatas: metadatas
         };
         Some((account_id.unwrap().to_string(), interaction))
     }
@@ -441,9 +462,7 @@ impl Endpoint {
      * @param body text to send
      * @return the interaction id if success. TODO, watch message status (if received)
      */
-    fn send_interaction_to_rori(&self, body: &str, datatype: &str) -> u64 {
-        let mut payloads: HashMap<&str, &str> = HashMap::new();
-        payloads.insert(datatype, body);
+    fn send_interaction_to_rori(&self, payloads: HashMap<&str, &str>) -> u64 {
         let payloads = Dict::new(payloads.iter());
 
         let dbus_msg = Message::new_method_call(self.ring_dbus, self.configuration_path, self.configuration_iface,
