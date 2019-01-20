@@ -7,7 +7,7 @@ authors = ["Sébastien Blin <contact@enconn.fr>"]
 dbus = "0.6.1" # requirements libdbus
 env_logger = "0.5.6"
 log = "0.4.1"
-reqwest = { git = "https://github.com/scottschroeder/reqwest", branch = "noverify" } # TODO wait for https://github.com/seanmonstar/reqwest/pull/198
+reqwest = "0.9.8"
 serenity = "0.5.11"
 serde = "1.0.34"
 serde_derive = "1.0.34"
