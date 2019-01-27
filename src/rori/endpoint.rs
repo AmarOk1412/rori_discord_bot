@@ -53,6 +53,16 @@ pub struct Endpoint {
 
 impl Endpoint {
     /**
+     * Send first /bridgify order
+     */
+    pub fn bridgify(manager: &Arc<Mutex<Endpoint>>) {
+        let datatype = "rori/command";
+        let mut payloads: HashMap<&str, &str> = HashMap::new();
+        payloads.insert(datatype, "/bridgify");
+        let m = manager.lock().unwrap();
+        m.send_interaction_to_rori(payloads);
+    }
+    /**
      * Init the RORI server, the database and retrieve the RING account linked
      * @param ring_id to retrieve
      * @return a Manager if success, else an error

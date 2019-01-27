@@ -173,10 +173,12 @@ fn create_config_file() {
 fn main() {
     // 0. Init logging
     env_logger::init();
+    let mut bridgify = false;
 
     // 1. Read current config
     // but if no config, create it
     if !Path::new("config.json").exists() {
+        bridgify = true;
         create_config_file();
     }
     let mut file = File::open("config.json").ok()
@@ -202,6 +204,9 @@ fn main() {
                            config["rori_ring_id"].as_str().unwrap_or(""))
             .ok().expect("Can't initialize ConfigurationEndpoint"))
         );
+        if bridgify {
+            Endpoint::bridgify(&shared_endpoint);
+        }
         Endpoint::handle_signals(shared_endpoint, stop_cloned, user_text, rori_text);
     });
 
