@@ -26,7 +26,7 @@
  **/
 
 use serenity::model::channel::Message;
-use serenity::model::id::ChannelId;
+use serenity::model::id::{ChannelId, UserId};
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use serenity::utils::MessageBuilder;
@@ -148,7 +148,7 @@ impl Bot {
                     let response = MessageBuilder::new()
                         .push(&*to_say)
                         .build();
-                    if let Some(id) = self.get_channel_from_id(&channel_id) {
+                    if let Some(id) = self.get_channel(&channel_id) {
                         if let Err(why) = id.say(&response) {
                             error!("Error sending message: {:?}", why);
                         }
@@ -168,14 +168,21 @@ impl Bot {
     }
 
     /**
-     * Retrieve a channel from an id
+     * Retrieve a channel from a channel_id or a user_id
      * @param self
-     * @param id
+     * @param id a channel_id or a user_id
      * @return the Channel if found, else the default channel if ready or None if not ready.
      */
-    fn get_channel_from_id(&self, id: &String) -> Option<ChannelId> {
+    fn get_channel(&self, id: &String) -> Option<ChannelId> {
         let ready = &*self.ready.lock().unwrap();
         if let Some(r) = ready {
+            // Search user linked
+            let userid = UserId(id.parse::<u64>().unwrap());
+            if let Ok(uid) = userid.to_user() {
+                let channel = uid.create_dm_channel().unwrap();
+                return Some(channel.id);
+            }
+            // Search channel id related
             let id = id.parse::<u64>().unwrap_or(0);
             if id != 0 {
                 return Some(ChannelId::from(id));

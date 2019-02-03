@@ -121,14 +121,33 @@ impl Endpoint {
                                 let username = String::from(j["username"].as_str().unwrap_or(""));
                                 if j["registered"].to_string() == "true" {
                                     if m.current_transactions.contains_key(&username) {
-                                        let _ = Database::add_user(m.current_transactions.get(&username).unwrap(), &username);
+                                        let uid = m.current_transactions.get(&username).unwrap().clone();
+                                        let _ = Database::add_user(&uid, &username);
                                         m.current_transactions.remove(&username);
+                                        // Inform the user
+                                        *rori_text.lock().unwrap() = DiscordMsg {
+                                            id: String::new(),
+                                            body: format!("You are now known as {}", username),
+                                            author: String::new(),
+                                            channel: uid,
+                                        };
                                     } else {
                                         warn!("Registered user found, but no user linked for {}", username);
                                     }
-                                } else {
+                                } else if j["registered"].to_string() == "false" {
+                                    let uid = Database::id(&username);
+                                    if uid.len() == 0 {
+                                        continue;
+                                    }
                                     let _ = Database::remove_user(&username);
                                     m.current_transactions.remove(&username);
+                                    // Inform the user
+                                    *rori_text.lock().unwrap() = DiscordMsg {
+                                        id: String::new(),
+                                        body: format!("You are not recognized as {} anymore", username),
+                                        author: String::new(),
+                                        channel: uid,
+                                    };
                                 }
                             },
                             _ => {
