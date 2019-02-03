@@ -185,7 +185,7 @@ impl Endpoint {
                     datatype = "rori/command";
                     // If no username
                     if username.len() == 0 {
-                        if utext.body.starts_with("/register") {
+                        if utext.body.starts_with("/register") || utext.body.starts_with("/link") {
                             let split: Vec<&str> = utext.body.split(' ').collect();
                             if split.len() < 2 {
                                 warn!("register received, but no username detected");
