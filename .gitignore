@@ -5,3 +5,5 @@ Cargo.lock
 
 # Config
 config.json
+
+*.db

@@ -30,6 +30,7 @@ use dbus::arg::{Array, Dict};
 use discord::DiscordMsg;
 use reqwest;
 use rori::account::Account;
+use rori::database::Database;
 use rori::interaction::Interaction;
 use serde_json::{Value, from_str};
 use std::collections::HashMap;
@@ -49,6 +50,7 @@ pub struct Endpoint {
     ring_dbus: &'static str,
     configuration_path: &'static str,
     configuration_iface: &'static str,
+    current_transactions: HashMap<String, String>
 }
 
 impl Endpoint {
@@ -68,6 +70,7 @@ impl Endpoint {
      * @return a Manager if success, else an error
      */
     pub fn init(ring_id: &str, rori_ring_id: &str) -> Result<Endpoint, &'static str> {
+        Database::init_db();
         let mut manager = Endpoint {
             account: Account::null(),
 
@@ -75,6 +78,7 @@ impl Endpoint {
             ring_dbus: "cx.ring.Ring",
             configuration_path: "/cx/ring/Ring/ConfigurationManager",
             configuration_iface: "cx.ring.Ring.ConfigurationManager",
+            current_transactions: HashMap::new(),
         };
         manager.account = Endpoint::build_account(ring_id);
         if !manager.account.enabled {
@@ -109,17 +113,40 @@ impl Endpoint {
             if let Some((account_id, interaction)) = m.handle_interactions(&i) {
                 info!("New interation for {}: {}", account_id, interaction);
                 if account_id == m.account.id {
-                    // TODO forward all interaction.
-                    let mut channel = String::new();
-                    if interaction.metadatas.contains_key("ch") {
-                        channel = interaction.metadatas["ch"].clone();
+                    if interaction.datatype == "rori/message" {
+                        match from_str(&interaction.body) {
+                            Ok(j) => {
+                                // Only if rori order
+                                let j: Value = j;
+                                let username = String::from(j["username"].as_str().unwrap_or(""));
+                                if j["registered"].to_string() == "true" {
+                                    if m.current_transactions.contains_key(&username) {
+                                        let _ = Database::add_user(m.current_transactions.get(&username).unwrap(), &username);
+                                        m.current_transactions.remove(&username);
+                                    } else {
+                                        warn!("Registered user found, but no user linked for {}", username);
+                                    }
+                                } else {
+                                    let _ = Database::remove_user(&username);
+                                    m.current_transactions.remove(&username);
+                                }
+                            },
+                            _ => {
+                                warn!("Message received, but not recognized: {}", interaction.body);
+                            }
+                        };
+                    } else {
+                        let mut channel = String::new();
+                        if interaction.metadatas.contains_key("ch") {
+                            channel = interaction.metadatas["ch"].clone();
+                        }
+                        *rori_text.lock().unwrap() = DiscordMsg {
+                            id: String::new(),
+                            body: interaction.body,
+                            author: String::new(),
+                            channel: channel,
+                        };
                     }
-                    *rori_text.lock().unwrap() = DiscordMsg {
-                        id: String::new(),
-                        body: interaction.body,
-                        author: String::new(),
-                        channel: channel,
-                    };
                 }
             };
             if let Some((account_id, from)) = m.handle_requests(&i) {
@@ -128,16 +155,45 @@ impl Endpoint {
                     // TODO
                 }
             };
-            let utext = user_text.lock().unwrap().clone();
+            let mut utext = user_text.lock().unwrap().clone();
             if utext.body != "" {
                 *user_text.lock().unwrap() = DiscordMsg::new();
+                // Retrieve username of current author
+                let username = Database::username(&utext.author);
+
                 let mut datatype = "text/plain";
                 if m.is_a_command(&utext.body) {
                     datatype = "rori/command";
+                    // If no username
+                    if username.len() == 0 {
+                        if utext.body.starts_with("/register") {
+                            let split: Vec<&str> = utext.body.split(' ').collect();
+                            if split.len() < 2 {
+                                warn!("register received, but no username detected");
+                                continue;
+                            }
+                            let u = String::from(*split.get(1).unwrap());
+                            // If /register, test if no transaction for this username
+                            if Database::id(&u).len() > 0 || m.current_transactions.contains_key(&u) {
+                                // already registered or in progress, drop request
+                                continue;
+                            }
+                            m.current_transactions.insert(u, utext.author.clone());
+                        } else if utext.body.starts_with("/unregister") {
+                            // Drop if /unregister
+                            continue;
+                        }
+                    } else {
+                        // If username
+                        if utext.body.starts_with("/register") {
+                            // If /register, drop
+                            continue;
+                        }
+                    }
                 }
                 let mut payloads: HashMap<&str, &str> = HashMap::new();
                 payloads.insert(datatype, &*utext.body);
-                payloads.insert("sa", &*utext.author);
+                payloads.insert("sa", &*username);
                 payloads.insert("th", &*utext.id);
                 payloads.insert("ch", &*utext.channel);
                 m.send_interaction_to_rori(payloads);
@@ -395,7 +451,7 @@ impl Endpoint {
             match detail {
                 (key, value) => {
                     // TODO for now, text/plain is the only supported datatypes, changes this with key in supported datatypes
-                    if key == "text/plain" {
+                    if key == "text/plain" || key == "rori/message" {
                         datatype = key.to_string();
                         body = value.to_string();
                     } else {

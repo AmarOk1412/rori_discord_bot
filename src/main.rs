@@ -30,6 +30,7 @@ extern crate env_logger;
 #[macro_use]
 extern crate log;
 extern crate reqwest;
+extern crate rusqlite;
 extern crate serenity;
 extern crate serde;
 extern crate serde_json;
@@ -173,7 +174,7 @@ fn create_config_file() {
 fn main() {
     // 0. Init logging
     env_logger::init();
-    let mut bridgify = false;
+    let mut bridgify = true;
 
     // 1. Read current config
     // but if no config, create it
