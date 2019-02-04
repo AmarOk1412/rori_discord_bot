@@ -30,7 +30,6 @@ use dbus::arg::{Array, Dict};
 use discord::DiscordMsg;
 use reqwest;
 use rori::account::Account;
-use rori::database::Database;
 use rori::interaction::Interaction;
 use serde_json::{Value, from_str};
 use std::collections::HashMap;
@@ -50,7 +49,6 @@ pub struct Endpoint {
     ring_dbus: &'static str,
     configuration_path: &'static str,
     configuration_iface: &'static str,
-    current_transactions: HashMap<String, String>
 }
 
 impl Endpoint {
@@ -65,12 +63,11 @@ impl Endpoint {
         m.send_interaction_to_rori(payloads);
     }
     /**
-     * Init the RORI server, the database and retrieve the RING account linked
+     * Init the RORI server and retrieve the RING account linked
      * @param ring_id to retrieve
      * @return a Manager if success, else an error
      */
     pub fn init(ring_id: &str, rori_ring_id: &str) -> Result<Endpoint, &'static str> {
-        Database::init_db();
         let mut manager = Endpoint {
             account: Account::null(),
 
@@ -78,7 +75,6 @@ impl Endpoint {
             ring_dbus: "cx.ring.Ring",
             configuration_path: "/cx/ring/Ring/ConfigurationManager",
             configuration_iface: "cx.ring.Ring.ConfigurationManager",
-            current_transactions: HashMap::new(),
         };
         manager.account = Endpoint::build_account(ring_id);
         if !manager.account.enabled {
@@ -119,34 +115,22 @@ impl Endpoint {
                                 // Only if rori order
                                 let j: Value = j;
                                 let username = String::from(j["username"].as_str().unwrap_or(""));
+                                let sa = String::from(j["sa"].as_str().unwrap_or(""));
                                 if j["registered"].to_string() == "true" {
-                                    if m.current_transactions.contains_key(&username) {
-                                        let uid = m.current_transactions.get(&username).unwrap().clone();
-                                        let _ = Database::add_user(&uid, &username);
-                                        m.current_transactions.remove(&username);
-                                        // Inform the user
-                                        *rori_text.lock().unwrap() = DiscordMsg {
-                                            id: String::new(),
-                                            body: format!("You are now known as {}", username),
-                                            author: String::new(),
-                                            channel: uid,
-                                        };
-                                    } else {
-                                        warn!("Registered user found, but no user linked for {}", username);
-                                    }
+                                    // Inform the user
+                                    *rori_text.lock().unwrap() = DiscordMsg {
+                                        id: String::new(),
+                                        body: format!("You are now known as {}", username),
+                                        author: String::new(),
+                                        channel: sa,
+                                    };
                                 } else if j["registered"].to_string() == "false" {
-                                    let uid = Database::id(&username);
-                                    if uid.len() == 0 {
-                                        continue;
-                                    }
-                                    let _ = Database::remove_user(&username);
-                                    m.current_transactions.remove(&username);
                                     // Inform the user
                                     *rori_text.lock().unwrap() = DiscordMsg {
                                         id: String::new(),
                                         body: format!("You are not recognized as {} anymore", username),
                                         author: String::new(),
-                                        channel: uid,
+                                        channel: sa,
                                     };
                                 }
                             },
@@ -177,42 +161,13 @@ impl Endpoint {
             let mut utext = user_text.lock().unwrap().clone();
             if utext.body != "" {
                 *user_text.lock().unwrap() = DiscordMsg::new();
-                // Retrieve username of current author
-                let username = Database::username(&utext.author);
-
                 let mut datatype = "text/plain";
                 if m.is_a_command(&utext.body) {
                     datatype = "rori/command";
-                    // If no username
-                    if username.len() == 0 {
-                        if utext.body.starts_with("/register") || utext.body.starts_with("/link") {
-                            let split: Vec<&str> = utext.body.split(' ').collect();
-                            if split.len() < 2 {
-                                warn!("register received, but no username detected");
-                                continue;
-                            }
-                            let u = String::from(*split.get(1).unwrap());
-                            // If /register, test if no transaction for this username
-                            if Database::id(&u).len() > 0 || m.current_transactions.contains_key(&u) {
-                                // already registered or in progress, drop request
-                                continue;
-                            }
-                            m.current_transactions.insert(u, utext.author.clone());
-                        } else if utext.body.starts_with("/unregister") {
-                            // Drop if /unregister
-                            continue;
-                        }
-                    } else {
-                        // If username
-                        if utext.body.starts_with("/register") {
-                            // If /register, drop
-                            continue;
-                        }
-                    }
                 }
                 let mut payloads: HashMap<&str, &str> = HashMap::new();
                 payloads.insert(datatype, &*utext.body);
-                payloads.insert("sa", &*username);
+                payloads.insert("sa", &*utext.author);
                 payloads.insert("th", &*utext.id);
                 payloads.insert("ch", &*utext.channel);
                 m.send_interaction_to_rori(payloads);

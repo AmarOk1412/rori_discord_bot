@@ -26,6 +26,5 @@
  **/
 
 pub mod account;
-pub mod database;
 pub mod interaction;
 pub mod endpoint;
