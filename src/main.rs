@@ -30,7 +30,6 @@ extern crate env_logger;
 #[macro_use]
 extern crate log;
 extern crate reqwest;
-extern crate rusqlite;
 extern crate serenity;
 extern crate serde;
 extern crate serde_json;
