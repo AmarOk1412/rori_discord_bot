@@ -25,6 +25,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
+use serenity::client::CACHE;
 use serenity::model::channel::Message;
 use serenity::model::id::{ChannelId, UserId};
 use serenity::model::gateway::Ready;
@@ -84,6 +85,7 @@ struct Handler {
 
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
+        let cache = CACHE.read();
         if msg.content == "/help" {
             let mut usage: String = String::from("Hi! I'm RORI, a free distributed chatterbot.\n");
             usage += "If you want to use this instance as another user.\n";
@@ -97,8 +99,7 @@ impl EventHandler for Handler {
             if let Err(why) = msg.channel_id.say(usage) {
                 println!("Error sending message: {:?}", why);
             }
-        } else {
-            // TODO: for now, just forward content
+        } else if msg.author.id != cache.user.id {
             *self.user_say.lock().unwrap() = DiscordMsg {
                 id: msg.id.as_u64().to_string(),
                 body: msg.content.clone(),
@@ -120,7 +121,7 @@ impl Bot {
      */
     pub fn new() -> Bot {
         Bot {
-            ready: Arc::new(Mutex::new(None))
+            ready: Arc::new(Mutex::new(None)),
         }
     }
 

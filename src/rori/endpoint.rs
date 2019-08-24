@@ -158,7 +158,7 @@ impl Endpoint {
                     // TODO
                 }
             };
-            let mut utext = user_text.lock().unwrap().clone();
+            let utext = user_text.lock().unwrap().clone();
             if utext.body != "" {
                 *user_text.lock().unwrap() = DiscordMsg::new();
                 let mut datatype = "text/plain";
