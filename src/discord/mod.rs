@@ -25,21 +25,24 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **/
 
+use serenity::async_trait;
+use serenity::http::Http;
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use serenity::model::gateway::Ready;
 use serenity::prelude::*;
 use serenity::utils::MessageBuilder;
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
+use std::sync::mpsc;
 
 /**
  * Represent a RING account, just here to store informations.
  **/
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Bot {
-    ready: Arc<Mutex<Option<Ready>>>,
+    ready: Option<Ready>,
+    ready_rcv: Option<mpsc::Receiver<Ready>>,
+    secret_token: String,
 }
 
 /**
@@ -79,11 +82,13 @@ impl Clone for DiscordMsg {
  */
 struct Handler {
     user_say: Arc<Mutex<DiscordMsg>>,
-    ready: Arc<Mutex<Option<Ready>>>,
+    sender: Arc<Mutex<mpsc::Sender<Ready>>>,
 }
 
+
+#[async_trait]
 impl EventHandler for Handler {
-    fn message(&self, _: Context, msg: Message) {
+    async fn message(&self, ctx: Context, msg: Message) {
         if msg.content == "/help" {
             let mut usage: String = String::from("Hi! I'm RORI, a free distributed chatterbot.\n");
             usage += "If you want to use this instance as another user.\n";
@@ -94,7 +99,7 @@ impl EventHandler for Handler {
             usage += "/rm_device <device_name> [id] for removing a device\n";
             usage += "/link <id|username> for adding a new device to a user";
 
-            if let Err(why) = msg.channel_id.say(usage) {
+            if let Err(why) = msg.channel_id.say(&ctx.http, usage).await {
                 println!("Error sending message: {:?}", why);
             }
         } else {
@@ -108,9 +113,9 @@ impl EventHandler for Handler {
         }
     }
 
-    fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
-        *self.ready.lock().unwrap() = Some(ready);
+        let _ = self.sender.lock().unwrap().send(ready);
     }
 }
 
@@ -118,9 +123,11 @@ impl Bot {
     /**
      * Create a Bot instance
      */
-    pub fn new() -> Bot {
+    pub fn new(token: &str) -> Bot {
         Bot {
-            ready: Arc::new(Mutex::new(None))
+            ready: None,
+            ready_rcv: None,
+            secret_token: String::from(token),
         }
     }
 
@@ -131,41 +138,34 @@ impl Bot {
      * @param user_say, what the user say for RORI
      * @param rori_say, what RORI say on Discord
      */
-    pub fn run(self, secret_token: &str, user_say: Arc<Mutex<DiscordMsg>>, rori_say: Arc<Mutex<DiscordMsg>>) {
+    pub async fn run(&mut self, user_say: Arc<Mutex<DiscordMsg>>) -> serenity::Client {
         // Configure the client with your Discord bot token in the environment.
-        let ready = self.ready.clone();
-        let mut client = Client::new(secret_token, Handler { user_say, ready })
-                         .expect("Error initializing RORI client");
-
-        let answer_thread = thread::spawn(move || {
-            loop {
-                // Forward incoming messages to discord
-                let to_say: String = String::from(&*rori_say.lock().unwrap().body.clone());
-                if !to_say.is_empty() {
-                    let channel_id: String = String::from(&*rori_say.lock().unwrap().channel.clone());
-                    *rori_say.lock().unwrap() = DiscordMsg::new();
-                    info!("{}", to_say);
-                    let response = MessageBuilder::new()
-                        .push(&*to_say)
-                        .build();
-                    if let Some(id) = self.get_channel_from_id(&channel_id) {
-                        if let Err(why) = id.say(&response) {
-                            error!("Error sending message: {:?}", why);
-                        }
-                    }
-                }
-                // Let some time for the daemon
-                let five_hundred_ms = Duration::from_millis(500);
-                thread::sleep(five_hundred_ms);
-            }
-        });
-
-        if let Err(why) = client.start() {
-            error!("Client error: {:?}", why);
-        }
-        // TODO stop correctly
-        let _ = answer_thread.join();
+        let (sender, receiver) = mpsc::channel();
+        self.ready_rcv = Some(receiver);
+        let sender = Arc::new(Mutex::new(sender));
+        Client::new(&*self.secret_token).event_handler(Handler { user_say, sender }).await
+                        .expect("Error initializing RORI client")
     }
+
+    pub async fn handle_messages(&mut self, rori_say: &Arc<Mutex<DiscordMsg>>) {
+        // Forward incoming messages to discord
+        let to_say: String = String::from(&*rori_say.lock().unwrap().body.clone());
+        if !to_say.is_empty() {
+            let channel_id: String = String::from(&*rori_say.lock().unwrap().channel.clone());
+            *rori_say.lock().unwrap() = DiscordMsg::new();
+            info!("///{}", to_say);
+            let http = Http::new_with_token(&*self.secret_token);
+            let response = MessageBuilder::new()
+                .push(&*to_say)
+                .build();
+            if let Some(id) = self.get_channel_from_id(&channel_id).await {
+                if let Err(why) = id.say(&http, &response).await {
+                    error!("Error sending message: {:?}", why);
+                }
+            }
+        }
+    }
+
 
     /**
      * Retrieve a channel from an id
@@ -173,20 +173,25 @@ impl Bot {
      * @param id
      * @return the Channel if found, else the default channel if ready or None if not ready.
      */
-    fn get_channel_from_id(&self, id: &String) -> Option<ChannelId> {
-        let ready = &*self.ready.lock().unwrap();
-        if let Some(r) = ready {
-            let id = id.parse::<u64>().unwrap_or(0);
-            if id != 0 {
-                return Some(ChannelId::from(id));
-            }
-            for guild in &r.guilds {
-                let server_name = guild.id().to_partial_guild().unwrap().name;
-                for (chan_id, chan) in guild.id().channels().ok().expect("No channels!") {
-                    // TODO default channel configuration!
-                    if server_name == "RORI" && chan.name() == "general" {
-                        return Some(chan_id)
-                    }
+    async fn get_channel_from_id(&mut self, id: &String) -> Option<ChannelId> {
+        if !self.ready_rcv.is_some() {
+            error!("ready_rcv should not be none");
+            return None;
+        }
+        if !self.ready.is_some() {
+            self.ready = Some(self.ready_rcv.as_ref().unwrap().recv().unwrap());
+        }
+        let http = Http::new_with_token(&*self.secret_token);
+        let id = id.parse::<u64>().unwrap_or(0);
+        if id != 0 {
+            return Some(ChannelId::from(id));
+        }
+        for guild in &self.ready.as_ref().unwrap().guilds {
+            let server_name = guild.id().to_partial_guild(&http).await.unwrap().name;
+            for (chan_id, chan) in guild.id().channels(&http).await.ok().expect("No channels!") {
+                // TODO default channel configuration!
+                if server_name == "RORI" && chan.name() == "general" {
+                    return Some(chan_id)
                 }
             }
         }

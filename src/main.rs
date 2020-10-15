@@ -50,9 +50,9 @@ use std::io::{stdin,stdout,Write};
 use std::fs::File;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::sync::atomic::AtomicBool;
 use std::thread;
 use std::time::Duration;
+use tokio;
 
 /**
  * Generate a config file
@@ -170,7 +170,8 @@ fn create_config_file() {
 
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // 0. Init logging
     env_logger::init();
 
@@ -189,8 +190,6 @@ fn main() {
     let config_cloned = config.clone();
 
     // 2. Init Ring account
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_cloned = stop.clone();
     let user_text = Arc::new(Mutex::new(DiscordMsg::new()));
     let rori_text = Arc::new(Mutex::new(DiscordMsg::new()));
     let user_text_cloned = user_text.clone();
@@ -202,14 +201,21 @@ fn main() {
                            config["rori_ring_id"].as_str().unwrap_or(""))
             .ok().expect("Can't initialize ConfigurationEndpoint"))
         );
-        Endpoint::handle_signals(shared_endpoint, stop_cloned, user_text, rori_text);
+        Endpoint::handle_signals(shared_endpoint, user_text, rori_text);
     });
 
     // 3. Run discord bot
-    let handle_discord_event = thread::spawn(move || {
-        Bot::new().run(&config_cloned["discord_secret_token"].as_str().unwrap_or(""),
-            user_text_cloned, rori_text_cloned);
+    let mut bot = Bot::new(&config_cloned["discord_secret_token"].as_str().unwrap_or(""));
+    let mut client = bot.run(user_text_cloned).await;
+    tokio::spawn(async move {
+        let five_hundred_ms = Duration::from_millis(500);
+        loop {
+            bot.handle_messages(&rori_text_cloned).await;
+            // Let some time for the daemon
+            tokio::time::delay_for(five_hundred_ms).await;
+        }
     });
-    // stop.store(false, Ordering::SeqCst);
-    let _ = handle_discord_event.join();
+    if let Err(why) = client.start().await {
+        error!("Client error: {:?}", why);
+    }
 }

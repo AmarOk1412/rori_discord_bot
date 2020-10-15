@@ -2,17 +2,16 @@
 name = "rori_discord_bot"
 version = "0.1.0"
 authors = ["Sébastien Blin <contact@enconn.fr>"]
+edition = "2018"
 
 [dependencies]
 dbus = "0.6.1" # requirements libdbus
 env_logger = "0.5.6"
 log = "0.4.1"
 reqwest = "0.9.8"
-serenity = "0.5.11"
+serenity = { version = "0.9.0-rc.1", default-features = false, features = ["client", "gateway", "rustls_backend", "model"] }
 serde = "1.0.34"
 serde_derive = "1.0.34"
 serde_json = "1.0.13"
 time = "0.1"
-
-[patch.crates-io]
-openssl = { git = "https://github.com/ishitatsuyuki/rust-openssl", branch = "0.9.x" } # TODO wait for https://github.com/serenity-rs/serenity/issues/394
+tokio = { version = "0.2", features = ["macros"] }

@@ -27,14 +27,13 @@
 
 use dbus::{Connection, ConnectionItem, BusType, Message};
 use dbus::arg::{Array, Dict};
-use discord::DiscordMsg;
+use crate::discord::DiscordMsg;
 use reqwest;
-use rori::account::Account;
-use rori::interaction::Interaction;
+use super::account::Account;
+use super::interaction::Interaction;
 use serde_json::{Value, from_str};
 use std::collections::HashMap;
 use std::io::Read;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use time;
 
@@ -83,7 +82,7 @@ impl Endpoint {
      * Listen from interresting signals from dbus and call handlers
      * @param self
      */
-    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, stop: Arc<AtomicBool>, user_text: Arc<Mutex<DiscordMsg>>, rori_text: Arc<Mutex<DiscordMsg>>) {
+    pub fn handle_signals(manager: Arc<Mutex<Endpoint>>, user_text: Arc<Mutex<DiscordMsg>>, rori_text: Arc<Mutex<DiscordMsg>>) {
         // Use another dbus connection to listen signals.
         let dbus_listener = Connection::get_private(BusType::Session).unwrap();
         dbus_listener.add_match("interface=cx.ring.Ring.ConfigurationManager,member=incomingAccountMessage").unwrap();
@@ -131,9 +130,6 @@ impl Endpoint {
                 payloads.insert("th", &*utext.id);
                 payloads.insert("ch", &*utext.channel);
                 m.send_interaction_to_rori(payloads);
-            }
-            if stop.load(Ordering::SeqCst) {
-                break;
             }
         }
     }
@@ -376,7 +372,7 @@ impl Endpoint {
         if &*msg.interface().unwrap() != "cx.ring.Ring.ConfigurationManager" { return None };
         if &*msg.member().unwrap() != "incomingAccountMessage" { return None };
         // incomingAccountMessage return three arguments
-        let (account_id, author_ring_id, payloads) = msg.get3::<&str, &str, Dict<&str, &str, _>>();
+        let (account_id, _msg_id, author_ring_id, payloads) = msg.get4::<&str, &str, &str, Dict<&str, &str, _>>();
         let author_ring_id = author_ring_id.unwrap().to_string();
         let mut body = String::new();
         let mut datatype = String::new();
