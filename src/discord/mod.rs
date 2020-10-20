@@ -83,6 +83,7 @@ impl Clone for DiscordMsg {
 struct Handler {
     user_say: Arc<Mutex<DiscordMsg>>,
     sender: Arc<Mutex<mpsc::Sender<Ready>>>,
+    current_user: Arc<Mutex<u64>>
 }
 
 
@@ -102,7 +103,7 @@ impl EventHandler for Handler {
             if let Err(why) = msg.channel_id.say(&ctx.http, usage).await {
                 println!("Error sending message: {:?}", why);
             }
-        } else {
+        } else if *msg.author.id.as_u64() != *self.current_user.lock().unwrap() {
             // TODO: for now, just forward content
             *self.user_say.lock().unwrap() = DiscordMsg {
                 id: msg.id.as_u64().to_string(),
@@ -115,6 +116,7 @@ impl EventHandler for Handler {
 
     async fn ready(&self, _: Context, ready: Ready) {
         info!("{} is connected!", ready.user.name);
+        *self.current_user.lock().unwrap() = *ready.user.id.as_u64();
         let _ = self.sender.lock().unwrap().send(ready);
     }
 }
@@ -143,7 +145,8 @@ impl Bot {
         let (sender, receiver) = mpsc::channel();
         self.ready_rcv = Some(receiver);
         let sender = Arc::new(Mutex::new(sender));
-        Client::new(&*self.secret_token).event_handler(Handler { user_say, sender }).await
+        let current_user = Arc::new(Mutex::new(0 as u64));
+        Client::new(&*self.secret_token).event_handler(Handler { user_say, sender, current_user }).await
                         .expect("Error initializing RORI client")
     }
 
@@ -153,7 +156,6 @@ impl Bot {
         if !to_say.is_empty() {
             let channel_id: String = String::from(&*rori_say.lock().unwrap().channel.clone());
             *rori_say.lock().unwrap() = DiscordMsg::new();
-            info!("///{}", to_say);
             let http = Http::new_with_token(&*self.secret_token);
             let response = MessageBuilder::new()
                 .push(&*to_say)
